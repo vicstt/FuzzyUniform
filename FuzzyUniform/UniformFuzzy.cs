@@ -20,20 +20,15 @@ public readonly record struct UniformFuzzy
 
     public double Mu(double x)
     {
-        if (x <= A) return 0.0;
-        if (x >= B) return 1.0;
-
+        if (x < A || x > B) return 0.0;
+        if (B == A) return 1.0;
         return (x - A) / (B - A);
     }
 
     public (double Lo, double Hi) AlphaCut(double alpha)
     {
-        if (alpha < 0 || alpha > 1)
-            throw new ArgumentOutOfRangeException(nameof(alpha));
-
-        if (B == A)
-            return (A, B);
-
+        if (alpha < 0 || alpha > 1) throw new ArgumentOutOfRangeException(nameof(alpha));
+        if (B == A) return (A, B);
         return (A + alpha * (B - A), B);
     }
 
@@ -45,27 +40,20 @@ public readonly record struct UniformFuzzy
     }
 
     public static implicit operator UniformFuzzy(double x) => new(x, x);
+    public static implicit operator FuzzyNumber(UniformFuzzy x) => FuzzyNumber.From(x);
 
-    public static UniformFuzzy operator -(UniformFuzzy x) => new(-x.B, -x.A);
     public static UniformFuzzy operator +(UniformFuzzy x, UniformFuzzy y) => new(x.A + y.A, x.B + y.B);
-    public static UniformFuzzy operator -(UniformFuzzy x, UniformFuzzy y) => new(x.A - y.B, x.B - y.A);
-    public static UniformFuzzy operator *(UniformFuzzy x, UniformFuzzy y)
-    {
-        double p1 = x.A * y.A, p2 = x.A * y.B, p3 = x.B * y.A, p4 = x.B * y.B;
-        return new(Math.Min(Math.Min(p1, p2), Math.Min(p3, p4)), Math.Max(Math.Max(p1, p2), Math.Max(p3, p4)));
-    }
-    public static UniformFuzzy operator /(UniformFuzzy x, UniformFuzzy y)
-    {
-        if (y.A <= 0 && 0 <= y.B) throw new DivideByZeroException("носитель делителя содержит 0");
-        return x * new UniformFuzzy(1.0 / y.B, 1.0 / y.A);
-    }
+    public static FuzzyNumber operator -(UniformFuzzy x) => -(FuzzyNumber)x;
+    public static FuzzyNumber operator -(UniformFuzzy x, UniformFuzzy y) => (FuzzyNumber)x - (FuzzyNumber)y;
+    public static FuzzyNumber operator *(UniformFuzzy x, UniformFuzzy y) => (FuzzyNumber)x * (FuzzyNumber)y;
+    public static FuzzyNumber operator /(UniformFuzzy x, UniformFuzzy y) => (FuzzyNumber)x / (FuzzyNumber)y;
 
-    public UniformFuzzy FMin(UniformFuzzy o) => new(Math.Min(A, o.A), Math.Min(B, o.B));
-    public UniformFuzzy FMax(UniformFuzzy o) => new(Math.Max(A, o.A), Math.Max(B, o.B));
+    public FuzzyNumber FMin(UniformFuzzy o) => FuzzyNumber.Min(this, o);
+    public FuzzyNumber FMax(UniformFuzzy o) => FuzzyNumber.Max(this, o);
 
-    public double PossibilityGe(UniformFuzzy o) => B >= o.A ? 1.0 : 0.0;
+    public double PossibilityGe(UniformFuzzy o) => B >= o.B ? 1.0 : o.Mu(B);
 
-    public double NecessityGe(UniformFuzzy o) => A >= o.B ? 1.0 : 0.0;
+    public double NecessityGe(UniformFuzzy o) => 1.0 - (o.B >= B ? 1.0 : Mu(o.B));
 
     private static double Clip01(double x) => x < 0 ? 0 : x > 1 ? 1 : x;
 

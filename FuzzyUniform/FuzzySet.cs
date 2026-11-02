@@ -42,17 +42,39 @@ public class FuzzySet
     public UniformFuzzy Mean()
     {
         if (Items.Count == 0) throw new InvalidOperationException("пустое множество");
-        return Sum() / (double)Items.Count;
+        var sum = Sum();  
+        return new UniformFuzzy(sum.A / Items.Count, sum.B / Items.Count);
     }
 
-    public UniformFuzzy FMin() => Items.Skip(1).Aggregate(Items[0], (r, x) => r.FMin(x));
-    public UniformFuzzy FMax() => Items.Skip(1).Aggregate(Items[0], (r, x) => r.FMax(x));
+    public FuzzyNumber FMin() => Items.Skip(1).Aggregate((FuzzyNumber)Items[0], (r, x) => FuzzyNumber.Min(r, x));
+    public FuzzyNumber FMax() => Items.Skip(1).Aggregate((FuzzyNumber)Items[0], (r, x) => FuzzyNumber.Max(r, x));
 
     public List<UniformFuzzy> SortedByComparison()
     {
         var l = new List<UniformFuzzy>(Items);
         l.Sort((p, q) => p.Compare(q));
         return l;
+    }
+
+    public List<(int Index, UniformFuzzy Value, double Lo, double Hi)> AtLevel(double alpha)
+    {
+        var r = new List<(int, UniformFuzzy, double, double)>();
+        for (int i = 0; i < Items.Count; i++) { var c = Items[i].AlphaCut(alpha); r.Add((i, Items[i], c.Lo, c.Hi)); }
+        Log.Info($"Срезы {Count} величин на уровне α = {alpha}");
+        return r;
+    }
+
+    public List<int> ContainingPoint(double x, double alpha)
+    {
+        var hits = new List<int>();
+        for (int i = 0; i < Items.Count; i++)
+        {
+            var c = Items[i].AlphaCut(alpha);
+            if (x >= c.Lo && x <= c.Hi) hits.Add(i);
+        }
+        string ids = string.Join(", ", hits.Take(100).Select(i => i + 1)) + (hits.Count > 100 ? ", …" : "");
+        Log.Info($"Уровень α = {alpha}: точку x = {x} содержат {hits.Count} из {Count} величин (№ {ids})");
+        return hits;
     }
 
     private record Dto(double a, double b);

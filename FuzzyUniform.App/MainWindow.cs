@@ -10,14 +10,17 @@ public class MainWindow : Window
 {
     FuzzySet set = new();
     ClusterResult? res;
+    readonly MembershipPlot membershipPlot = new() { Height = 260 };
 
     readonly TextBox[] tbA = { Tb("1", 70), Tb("3", 70) };
     readonly TextBox[] tbB = { Tb("2", 70), Tb("5", 70) };
     readonly TextBox calcOut = new() { IsReadOnly = true, AcceptsReturn = true, Height = 150 };
     readonly RowsPlot calcPlot = new() { Height = 200 };
+    readonly TextBox tbAlpha = Tb("0.9", 60);
 
     readonly Dictionary<string, TextBox> prm = new();
     readonly TextBox pathBox = Tb("set.json", 220);
+    readonly TextBox tbLevel = Tb("0.25", 60), tbPoint = Tb("", 80);
     readonly ListBox list = new() { FontFamily = new FontFamily("DejaVu Sans Mono, Consolas, Menlo, monospace") };
     readonly TextBlock setInfo = new() { Margin = new Avalonia.Thickness(6) };
 
@@ -72,13 +75,26 @@ public class MainWindow : Window
 
     Control BuildCalc()
     {
-        var top = Row(L("A: a, b ="), tbA[0], tbA[1], L("   B: c, d ="), tbB[0], tbB[1],
+        var top = Row(L("A: a, b ="), tbA[0], tbA[1], L("   B: c, d ="), tbB[0], tbB[1], L("   α ="), tbAlpha,
             Btn("A + B", () => Calc('+'), 70), Btn("A − B", () => Calc('-'), 70),
             Btn("A × B", () => Calc('*'), 70), Btn("A ÷ B", () => Calc('/'), 70));
         var dock = new DockPanel();
-        DockPanel.SetDock(top, Dock.Top); DockPanel.SetDock(calcOut, Dock.Top);
-        dock.Children.Add(top); dock.Children.Add(calcOut); dock.Children.Add(calcPlot);
+        DockPanel.SetDock(top, Dock.Top); 
+        DockPanel.SetDock(calcOut, Dock.Top);
+        DockPanel.SetDock(membershipPlot, Dock.Top);
+
+        dock.Children.Add(top);
+        dock.Children.Add(calcOut);
+        dock.Children.Add(membershipPlot);
+        dock.Children.Add(calcPlot);
         return dock;
+    }
+
+    static void AddSingleCut(List<(double a, double b, int color, string t)> rows, FuzzyNumber f, int color, string name, double alpha)
+    {
+        var c = f.AlphaCut(alpha);
+
+        rows.Add((c.Lo, c.Hi, color, $"{name}, α={alpha:0.##}"));
     }
 
     void Calc(char op)
@@ -88,17 +104,35 @@ public class MainWindow : Window
             status.Text = "";
             var A = new UniformFuzzy(P(tbA[0].Text), P(tbA[1].Text));
             var B = new UniformFuzzy(P(tbB[0].Text), P(tbB[1].Text));
-            UniformFuzzy R = op switch { '+' => A + B, '-' => A - B, '*' => A * B, _ => A / B };
-            Log.Info($"A={A} B={B}  A{op}B={R}");
+            double al = P(tbAlpha.Text);
+            FuzzyNumber R = op switch { '+' => (FuzzyNumber)(A + B), '-' => A - B, '*' => A * B, _ => A / B };
+            string Cut(FuzzyNumber x) { var c = x.AlphaCut(al); return $"[{F(c.Lo)}; {F(c.Hi)}]"; }
+            Log.Info($"A={A} B={B}  A{op}B: {R}; α={F(al)}: A_α={Cut(A)} B_α={Cut(B)} R_α={Cut(R)}");
             string cmp = new[] { "A<B", "A~B", "A>B" }[A.Compare(B) + 1];
             calcOut.Text =
-                $"A = {A}\nB = {B}\nA {op} B = {R}\n\nСравнение A и B:\n" +
-                $"  Pos(A≥B)={A.PossibilityGe(B):0}  Nec(A≥B)={A.NecessityGe(B):0}\n" +
+                $"A = {A}\nB = {B}\nA {op} B: {R}\n\n" +
+                $"На уровне α = {F(al)}:\n  A_α = {Cut(A)}\n  B_α = {Cut(B)}\n  (A {op} B)_α = {Cut(R)}\n\n" +
+                $"Сравнение A и B:\n  Pos(A≥B)={A.PossibilityGe(B):0.000}  Nec(A≥B)={A.NecessityGe(B):0.000}\n" +
                 $"  d(A≥B)={A.DegreeGe(B):0.0000}  d(B≥A)={B.DegreeGe(A):0.0000}  результат: {cmp}\n" +
                 $"Расстояние Хаусдорфа d(A,B)={F(A.Distance(B))}, сходство Жаккара={A.Similarity(B):0.0000}";
-            calcPlot.Set(new() { (A.A, A.B, 0, "A"), (B.A, B.B, 1, "B"), (R.A, R.B, 2, "R") }, 40, true);
+            var rows = new List<(double a, double b, int color, string t)>();
+            AddSingleCut(rows, A, 0, "A", al);
+            AddSingleCut(rows, B, 1, "B", al);
+            AddSingleCut(rows, R, 2, "R", al);
+            membershipPlot.Set(new List<(FuzzyNumber Value, int Color, string Name)>
+            {((FuzzyNumber)A, 0, "A"), ((FuzzyNumber)B, 1, "B"), (R, 2, "R")}, al);
+            calcPlot.Set(rows, 12, true);
         }
         catch (Exception ex) { Fail(ex); }
+    }
+
+    static void AddLadder(List<(double a, double b, int color, string t)> rows, FuzzyNumber f, int color, string name)
+    {
+        for (int k = 10; k >= 0; k--)
+        {
+            var c = f.AlphaCut(k / 10.0);
+            rows.Add((c.Lo, c.Hi, color, k == 10 ? name : ""));
+        }
     }
 
     Control BuildSet()
@@ -110,11 +144,14 @@ public class MainWindow : Window
             var tb = Tb(d, 60); prm[n] = tb; pr.Add(L(n)); pr.Add(tb);
         }
         var top = Row(pr.ToArray());
-        var bar = Row(Btn("Сгенерировать", Gen, 140), Btn("Нечёткое среднее", MeanSet, 160),
+        var bar = Row(Btn("Сгенерировать", Gen, 140), Btn("Нечёткое среднее", MeanSet, 150),
                       L("файл:"), pathBox, Btn("Загрузить", LoadSet, 100), Btn("Сохранить", SaveSet, 100));
+        var lvlBar = Row(L("уровень α"), tbLevel, L("точка x"), tbPoint,
+                         Btn("Показать на уровне α", ShowLevel, 200));
         var dock = new DockPanel();
-        DockPanel.SetDock(top, Dock.Top); DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(setInfo, Dock.Bottom);
-        dock.Children.Add(top); dock.Children.Add(bar); dock.Children.Add(setInfo); dock.Children.Add(list);
+        DockPanel.SetDock(top, Dock.Top); DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(lvlBar, Dock.Top);
+        DockPanel.SetDock(setInfo, Dock.Bottom);
+        dock.Children.Add(top); dock.Children.Add(bar); dock.Children.Add(lvlBar); dock.Children.Add(setInfo); dock.Children.Add(list);
         return dock;
     }
 
@@ -137,6 +174,31 @@ public class MainWindow : Window
     {
         if (set.Count == 0) return;
         var m = set.Mean(); Log.Info($"Нечёткое среднее = {m}"); setInfo.Text = $"Нечёткое среднее: {m}";
+    }
+
+    void ShowLevel()
+    {
+        try
+        {
+            status.Text = "";
+            if (set.Count == 0) { status.Text = "Сначала создайте множество"; return; }
+            double al = P(tbLevel.Text);
+            bool hasX = !string.IsNullOrWhiteSpace(tbPoint.Text);
+            double x = hasX ? P(tbPoint.Text) : 0;
+            var cuts = set.AtLevel(al);
+            var hits = hasX ? new HashSet<int>(set.ContainingPoint(x, al)) : null;
+            var lines = new List<string> { $"{"№",4} {"a",10} {"b",10} {"срез на уровне α",26}" };
+            foreach (var r in cuts)
+            {
+                if (hits != null && !hits.Contains(r.Index)) continue;
+                lines.Add($"{r.Index + 1,4} {F(r.Value.A),10} {F(r.Value.B),10} {"[" + F(r.Lo) + "; " + F(r.Hi) + "]",26}");
+            }
+            list.ItemsSource = lines;
+            setInfo.Text = hits == null
+                ? $"Срезы {set.Count} величин на уровне α = {F(al)}"
+                : $"На уровне α = {F(al)} точку x = {F(x)} содержат {hits.Count} из {set.Count} величин";
+        }
+        catch (Exception ex) { Fail(ex); }
     }
 
     void ShowSet()
@@ -168,8 +230,7 @@ public class MainWindow : Window
         try
         {
             status.Text = "";
-            var it = set.Items;
-            int k = (int)P(tbK.Text);
+            var it = set.Items; int k = (int)P(tbK.Text); string extra = "";
             var lk = cbLink.SelectedIndex switch
             { 0 => Clustering.Linkage.Complete, 1 => Clustering.Linkage.Single, _ => Clustering.Linkage.Average };
             ClusterResult r;
@@ -184,16 +245,16 @@ public class MainWindow : Window
                     break;
 
                 case 2:
-                    r = Clustering.Agglomerative(
-                        it, theta: P(tbTheta.Text), linkage: lk);
+                    r = Clustering.Agglomerative(it, theta: P(tbTheta.Text), linkage: lk);
                     break;
 
                 default:
-                    throw new InvalidOperationException("Неизвестный метод кластеризации");
+                    status.Text = "Выберите метод кластеризации";
+                    return;
             }
             res = r;
             double s = Clustering.Silhouette(it, r.Labels);
-            var t = $"{r.Method}: кластеров = {r.K}, inertia = {r.Inertia:0.000}, силуэт = {s:0.000}\n";
+            var t = $"{r.Method}: кластеров = {r.K}, inertia = {r.Inertia:0.000}, силуэт = {s:0.000}\n{extra}";
             var gr = r.Groups();
             for (int j = 0; j < r.K; j++) t += $"  К{j + 1}: центр (нечёткое среднее) {r.Centers[j]}, размер {gr[j].Count}\n";
             cluOut.Text = t; Log.Info(t.Replace("\n", " | "));

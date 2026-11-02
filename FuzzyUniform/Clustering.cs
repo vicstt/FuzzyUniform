@@ -67,8 +67,10 @@ public static class Clustering
             var d2 = P.Select(p => Math.Pow(C.Min(c => D(p, c)), 2)).ToArray();
             double s = d2.Sum(); int idx = n - 1;
             if (s == 0) idx = rng.Next(n);
-            else { double r = rng.NextDouble() * s, acc = 0; 
-            for (int i = 0; i < n; i++) { acc += d2[i]; if (acc >= r) { idx = i; break; } } }
+            else { 
+                double r = rng.NextDouble() * s, acc = 0; 
+                for (int i = 0; i < n; i++) { acc += d2[i]; if (acc >= r) { idx = i; break; } } 
+            }
             C.Add((double[])P[idx].Clone());
         }
         var labels = Enumerable.Repeat(-1, n).ToArray(); int it;
